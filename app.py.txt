@@ -1,0 +1,131 @@
+import streamlit as st
+import yfinance as yf
+import twstock
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import stats
+from datetime import datetime, timedelta
+
+# 設定中文字型 (避免亂碼，雲端環境通用解法)
+plt.rcParams['font.sans-serif'] = ['DejaVu Sans'] 
+plt.rcParams['axes.unicode_minus'] = False
+
+# === 設定網頁標題與排版 ===
+st.set_page_config(page_title="AI 飆股五線譜", layout="wide", page_icon="📈")
+st.title("📱 個人股票戰情室")
+
+# === 核心分析邏輯 ===
+def run_strategy(stock_id, timeframe_mode):
+    stock_id = stock_id.strip().upper()
+    if not stock_id: 
+        st.warning("請輸入代號")
+        return
+
+    # 1. 處理代號
+    stock_name = stock_id 
+    ticker = stock_id
+    if stock_id.isdigit():
+        ticker = f"{stock_id}.TW"
+        if stock_id in twstock.codes:
+            stock_name = twstock.codes[stock_id].name
+    else:
+        try:
+            t = yf.Ticker(ticker)
+            stock_name = t.info.get('shortName', stock_id)
+        except: pass
+
+    # 2. 設定參數
+    if timeframe_mode == '3.5年 (長線)':
+        lookback_days = 850
+        channel_window = 100
+    elif timeframe_mode == '1年 (波段)':
+        lookback_days = 250
+        channel_window = 60
+    else: # 半年
+        lookback_days = 120
+        channel_window = 20
+
+    with st.spinner(f"正在分析 {stock_id} {stock_name}..."):
+        # 抓取資料
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=lookback_days * 2) 
+        try:
+            df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+            if df.empty and stock_id.isdigit():
+                ticker = f"{stock_id}.TWO"
+                df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+            
+            if df.empty:
+                st.error(f"❌ 找不到代號 {stock_id}")
+                return
+
+            # 資料清理
+            if isinstance(df.columns, pd.MultiIndex):
+                df_close = df.xs('Close', level=0, axis=1).iloc[:, 0]
+                df_high = df.xs('High', level=0, axis=1).iloc[:, 0]
+                df_low = df.xs('Low', level=0, axis=1).iloc[:, 0]
+            else:
+                df_close = df['Close']
+                df_high = df['High']
+                df_low = df['Low']
+
+            if len(df_close) < lookback_days: lookback_days = len(df_close)
+            df_calc = pd.DataFrame({'Close': df_close, 'High': df_high, 'Low': df_low}).tail(lookback_days).copy()
+            
+            # 計算五線譜
+            y = df_calc['Close'].values
+            x = np.arange(len(y))
+            slope, intercept, _, _, _ = stats.linregress(x, y)
+            trend_line = slope * x + intercept
+            std_dev = np.std(y - trend_line)
+
+            # 計算通道
+            lohas_upper = df_calc['High'].rolling(window=channel_window).max()
+            lohas_lower = df_calc['Low'].rolling(window=channel_window).min()
+            lohas_ma = df_calc['Close'].rolling(window=channel_window).mean()
+
+            # === 繪圖 ===
+            st.subheader(f"{stock_name} - 五線譜位階")
+            fig1, ax1 = plt.subplots(figsize=(10, 5))
+            ax1.plot(df_calc.index, trend_line + 2*std_dev, 'r--', label='+2SD')
+            ax1.plot(df_calc.index, trend_line + 1*std_dev, color='salmon', linestyle='--')
+            ax1.plot(df_calc.index, trend_line, 'b', alpha=0.8, label='TL')
+            ax1.plot(df_calc.index, trend_line - 1*std_dev, color='lightgreen', linestyle='--')
+            ax1.plot(df_calc.index, trend_line - 2*std_dev, 'g--', label='-2SD')
+            ax1.plot(df_calc.index, y, 'k', label='Price')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            st.pyplot(fig1)
+
+            st.subheader(f"動能通道 ({channel_window}日)")
+            fig2, ax2 = plt.subplots(figsize=(10, 5))
+            ax2.fill_between(df_calc.index, lohas_upper, lohas_lower, color='cyan', alpha=0.1)
+            ax2.plot(df_calc.index, lohas_upper, color='teal')
+            ax2.plot(df_calc.index, lohas_lower, color='teal')
+            ax2.plot(df_calc.index, lohas_ma, color='orange', linestyle='--')
+            ax2.plot(df_calc.index, y, 'k')
+            ax2.grid(True, alpha=0.3)
+            st.pyplot(fig2)
+
+            # === 數值卡片 ===
+            curr = y[-1]
+            p2sd = (trend_line + 2*std_dev)[-1]
+            col1, col2 = st.columns(2)
+            col1.metric("目前股價", f"{curr:.2f}")
+            col2.metric("+2SD 價格", f"{p2sd:.2f}", delta=f"{curr-p2sd:.2f}" if curr>p2sd else None, delta_color="inverse")
+
+        except Exception as e:
+            st.error(f"分析失敗: {e}")
+
+# === 側邊欄介面 ===
+with st.sidebar:
+    st.header("⚙️ 設定")
+    stock_input = st.text_input("股票代號", "2330")
+    mode_input = st.selectbox("分析週期", ['3.5年 (長線)', '1年 (波段)', '半年 (飆股 - 極短線)'])
+    go_btn = st.button("開始分析", type="primary")
+
+if go_btn:
+    run_strategy(stock_input, mode_input)
+else:
+    st.info("👈 請在側邊欄輸入代號並按「開始分析」")
