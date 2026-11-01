@@ -7,16 +7,19 @@ import matplotlib.pyplot as plt
 from scipy import stats
 from datetime import datetime, timedelta
 
-plt.style.use('dark_background')
+# 恢復為預設白底圖表，符合你的 PS 設計圖
+plt.style.use('default')
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
 st.set_page_config(page_title="AI 飆股五線譜", layout="wide", page_icon="📈")
 
-top_left, top_right = st.columns([1.2, 2])
+# 頂部：切分左右兩欄 (左邊戰情室輸入，右邊 AI 解讀)
+top_left, top_right = st.columns([1, 1.5])
 
 with top_left:
-    st.title("📱 個人股票戰情室")
+    st.markdown("### 📱 個人股票戰情室")
+    st.write("") # 增加微小間距
     input_col1, input_col2 = st.columns(2)
     with input_col1:
         stock_input = st.text_input("股票代號", "^TWII", label_visibility="collapsed")
@@ -110,34 +113,39 @@ if go_btn or stock_input:
             trend_desc = "股價長期重心向上移動，回檔找買點勝率較高。" if slope > 0 else "股價長期重心向下移動，反彈找賣點勝率較高。"
             st.markdown(f"📊 趨勢背景： **{trend_status}** (斜率 {slope:.2f}) - {trend_desc}")
 
-        st.divider()
+        st.write("") # 增加區塊間距
 
+        # 下方圖表：左右並排
         chart_col1, chart_col2 = st.columns(2)
 
         with chart_col1:
-            st.markdown(f"##### {stock_name} - 五線譜位階")
-            fig1, ax1 = plt.subplots(figsize=(8, 4.5), dpi=120)
-            ax1.plot(df_calc.index, trend_line + 2*std_dev, color='#FF5050', linestyle='--', linewidth=1.2, label='+2SD')
-            ax1.plot(df_calc.index, trend_line + 1*std_dev, color='#FF9999', linestyle='--', linewidth=1)
-            ax1.plot(df_calc.index, trend_line, color='#3399FF', linewidth=1.8, label='TL')
-            ax1.plot(df_calc.index, trend_line - 1*std_dev, color='#99FF99', linestyle='--', linewidth=1)
-            ax1.plot(df_calc.index, trend_line - 2*std_dev, color='#33CC33', linestyle='--', linewidth=1.2, label='-2SD')
-            ax1.plot(df_calc.index, y, color='#FFFFFF', linewidth=1.2, label='Price')
-            ax1.legend(loc='upper left', framealpha=0.3)
-            ax1.grid(True, color='#444444', linestyle=':', alpha=0.6)
-            plt.tight_layout()
+            st.markdown(f"**{stock_name} - 五線譜位階**")
+            fig1, ax1 = plt.subplots(figsize=(8, 4.5))
+            # 維持你原本習慣的顏色設定
+            ax1.plot(df_calc.index, trend_line + 2*std_dev, 'r--', label='+2SD')
+            ax1.plot(df_calc.index, trend_line + 1*std_dev, color='salmon', linestyle='--', alpha=0.5)
+            ax1.plot(df_calc.index, trend_line, 'b', label='TL')
+            ax1.plot(df_calc.index, trend_line - 1*std_dev, color='lightgreen', linestyle='--', alpha=0.5)
+            ax1.plot(df_calc.index, trend_line - 2*std_dev, 'g--', label='-2SD')
+            ax1.plot(df_calc.index, y, 'k', label='Price')
+            ax1.legend(loc='upper left')
+            ax1.grid(True, alpha=0.3)
+            # 強制設定為白底，避免被網頁黑底影響
+            fig1.patch.set_facecolor('white')
+            ax1.set_facecolor('white')
             st.pyplot(fig1)
 
         with chart_col2:
-            st.markdown(f"##### 動能通道 ({channel_window}日)")
-            fig2, ax2 = plt.subplots(figsize=(8, 4.5), dpi=120)
-            ax2.fill_between(df_calc.index, lohas_upper, lohas_lower, color='#00FFFF', alpha=0.15)
-            ax2.plot(df_calc.index, lohas_upper, color='#00CCCC', linewidth=1.2)
-            ax2.plot(df_calc.index, lohas_lower, color='#00CCCC', linewidth=1.2)
-            ax2.plot(df_calc.index, lohas_ma, color='#FFCC00', linestyle='--', linewidth=1.2)
-            ax2.plot(df_calc.index, y, color='#FFFFFF', linewidth=1.2)
-            ax2.grid(True, color='#444444', linestyle=':', alpha=0.6)
-            plt.tight_layout()
+            st.markdown(f"**動能通道 ({channel_window}日)**")
+            fig2, ax2 = plt.subplots(figsize=(8, 4.5))
+            ax2.fill_between(df_calc.index, lohas_upper, lohas_lower, color='cyan', alpha=0.1)
+            ax2.plot(df_calc.index, lohas_upper, color='teal')
+            ax2.plot(df_calc.index, lohas_lower, color='teal')
+            ax2.plot(df_calc.index, lohas_ma, color='orange', linestyle='--')
+            ax2.plot(df_calc.index, y, 'k')
+            ax2.grid(True, alpha=0.3)
+            fig2.patch.set_facecolor('white')
+            ax2.set_facecolor('white')
             st.pyplot(fig2)
 
     except Exception as e:
