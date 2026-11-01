@@ -12,6 +12,7 @@ plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
 st.set_page_config(page_title='AI 飆股五線譜', layout='wide', page_icon='📈', initial_sidebar_state='collapsed')
+st.title("✅ 新版排版測試 V2")
 
 st.markdown('''
 <style>
