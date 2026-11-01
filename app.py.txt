@@ -7,146 +7,170 @@ import matplotlib.pyplot as plt
 from scipy import stats
 from datetime import datetime, timedelta
 
-# 恢復為預設白底圖表，符合你的 PS 設計圖
 plt.style.use('default')
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
-st.set_page_config(page_title="AI 飆股五線譜", layout="wide", page_icon="📈")
+st.set_page_config(page_title='AI 飆股五線譜', layout='wide', page_icon='📈', initial_sidebar_state='collapsed')
 
-# 頂部：切分左右兩欄 (左邊戰情室輸入，右邊 AI 解讀)
-top_left, top_right = st.columns([1, 1.5])
+st.markdown('''
+<style>
+/* 桌面版拉寬，讓兩張圖充分佔滿下排 */
+.block-container {max-width: 1600px; padding-top: 2.2rem; padding-bottom: 1.2rem; padding-left: 1.4rem; padding-right: 1.4rem;}
+[data-testid="stVerticalBlock"] {gap: .65rem;}
+h3, h4 {margin: 0 !important; padding: 0 !important;}
+[data-testid="stForm"] {border: 0; padding: 0; background: transparent;}
+[data-testid="stForm"] [data-testid="stHorizontalBlock"] {gap: .65rem;}
+[data-testid="stFormSubmitButton"] button {background: #ff4b4b; color: white; border: 0; min-height: 2.65rem; font-weight: 600;}
+[data-testid="stFormSubmitButton"] button:hover {background: #ee3838; color: white;}
+[data-testid="stPlotlyChart"], [data-testid="stImage"] {width: 100%;}
+[data-testid="stAlert"] {padding: .85rem 1rem;}
+@media (max-width: 800px) {
+ .block-container {padding: 1rem .7rem;}
+}
+</style>
+''', unsafe_allow_html=True)
 
-with top_left:
-    st.markdown("### 📱 個人股票戰情室")
-    st.write("") # 增加微小間距
-    input_col1, input_col2 = st.columns(2)
-    with input_col1:
-        stock_input = st.text_input("股票代號", "^TWII", label_visibility="collapsed")
-    with input_col2:
-        mode_input = st.selectbox("分析週期", ['3.5年 (長線)', '1年 (波段)', '半年 (飆股 - 極短線)'], label_visibility="collapsed")
-    go_btn = st.button("開始分析", type="primary", use_container_width=True)
+# 使用表單避免每次改代號就自動重算；按鈕之後結果會留在畫面上。
+left, right = st.columns([0.42, 0.58], gap='large', vertical_alignment='top')
+with left:
+    st.markdown('### 📱 個人股票戰情室')
+    with st.form('stock_form'):
+        col_code, col_period = st.columns(2, gap='small')
+        with col_code:
+            stock_input = st.text_input('股票代號', value='^TWII', label_visibility='collapsed', placeholder='輸入股票代號')
+        with col_period:
+            mode_input = st.selectbox('分析週期', ['3.5年 (長線)', '1年 (波段)', '半年 (飆股 - 極短線)'], label_visibility='collapsed')
+        submitted = st.form_submit_button('開始分析', type='primary', use_container_width=True)
 
-if go_btn or stock_input:
+with right:
+    st.markdown('### 💡 AI 投資顧問解讀')
+    advice_area = st.container()
+
+# 首次開啟自動呈現預設代號；之後只在按下開始分析時更新。
+if 'analysis' not in st.session_state or submitted:
     stock_id = stock_input.strip().upper()
     if not stock_id:
-        st.warning("請輸入代號")
+        st.warning('請輸入股票代號。')
         st.stop()
 
-    stock_name = stock_id
     ticker = stock_id
+    stock_name = stock_id
     if stock_id.isdigit():
-        ticker = f"{stock_id}.TW"
+        ticker = f'{stock_id}.TW'
         if stock_id in twstock.codes:
             stock_name = twstock.codes[stock_id].name
     else:
         try:
-            t = yf.Ticker(ticker)
-            stock_name = t.info.get('shortName', stock_id)
-        except: pass
+            stock_name = yf.Ticker(ticker).info.get('shortName') or stock_id
+        except Exception:
+            pass
 
     if mode_input == '3.5年 (長線)':
-        lookback_days = 850
-        channel_window = 100
+        lookback_days, channel_window = 850, 100
     elif mode_input == '1年 (波段)':
-        lookback_days = 250
-        channel_window = 60
+        lookback_days, channel_window = 250, 60
     else:
-        lookback_days = 120
-        channel_window = 20
+        lookback_days, channel_window = 120, 20
 
     end_date = datetime.now()
     start_date = end_date - timedelta(days=lookback_days * 2)
-    
     try:
-        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
-        if df.empty and stock_id.isdigit():
-            ticker = f"{stock_id}.TWO"
+        with st.spinner('正在取得股價及計算指標…'):
             df = yf.download(ticker, start=start_date, end=end_date, progress=False)
-        
-        if df.empty:
-            st.error(f"❌ 找不到代號 {stock_id}")
-            st.stop()
+            if df.empty and stock_id.isdigit():
+                ticker = f'{stock_id}.TWO'
+                df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+            if df.empty:
+                st.error(f'找不到股票代號 {stock_id} 的行情資料。')
+                st.stop()
 
-        if isinstance(df.columns, pd.MultiIndex):
-            df_close = df.xs('Close', level=0, axis=1).iloc[:, 0]
-            df_high = df.xs('High', level=0, axis=1).iloc[:, 0]
-            df_low = df.xs('Low', level=0, axis=1).iloc[:, 0]
-        else:
-            df_close = df['Close']
-            df_high = df['High']
-            df_low = df['Low']
-
-        if len(df_close) < lookback_days: lookback_days = len(df_close)
-        df_calc = pd.DataFrame({'Close': df_close, 'High': df_high, 'Low': df_low}).tail(lookback_days).copy()
-        
-        y = df_calc['Close'].values
-        x = np.arange(len(y))
-        slope, intercept, _, _, _ = stats.linregress(x, y)
-        trend_line = slope * x + intercept
-        std_dev = np.std(y - trend_line)
-
-        lohas_upper = df_calc['High'].rolling(window=channel_window).max()
-        lohas_lower = df_calc['Low'].rolling(window=channel_window).min()
-        lohas_ma = df_calc['Close'].rolling(window=channel_window).mean()
-
-        curr = y[-1]
-        p2sd = (trend_line + 2*std_dev)[-1]
-        p1sd = (trend_line + 1*std_dev)[-1]
-        m1sd = (trend_line - 1*std_dev)[-1]
-        m2sd = (trend_line - 2*std_dev)[-1]
-
-        with top_right:
-            st.markdown("#### 💡 AI 投資顧問解讀")
-            if curr > p2sd:
-                st.error("🚨 **極度危險 (強烈減碼訊號)**\n\n目前股價已突破 +2SD，價格極度昂貴。")
-            elif curr > p1sd:
-                st.warning("⚠️ **相對高檔 (減碼訊號)**\n\n目前股價位於 +1SD ~ +2SD 之間，價格偏貴。若持有部位可考慮適度調節，空手者不建議此時進場。")
-            elif curr < m2sd:
-                st.success("💰 **極度便宜 (強烈買進訊號)**\n\n目前股價跌破 -2SD，價格極度便宜。")
-            elif curr < m1sd:
-                st.info("🟢 **相對低檔 (買進訊號)**\n\n目前股價位於 -1SD ~ -2SD 之間，價格偏便宜。")
+            if isinstance(df.columns, pd.MultiIndex):
+                close = df.xs('Close', level=0, axis=1).iloc[:, 0]
+                high = df.xs('High', level=0, axis=1).iloc[:, 0]
+                low = df.xs('Low', level=0, axis=1).iloc[:, 0]
             else:
-                st.info("⚖️ **價格合理 (觀望或定期定額)**\n\n目前股價位於 -1SD ~ +1SD 之間，評價合理。")
-            
-            trend_status = "多頭趨勢" if slope > 0 else "空頭趨勢"
-            trend_desc = "股價長期重心向上移動，回檔找買點勝率較高。" if slope > 0 else "股價長期重心向下移動，反彈找賣點勝率較高。"
-            st.markdown(f"📊 趨勢背景： **{trend_status}** (斜率 {slope:.2f}) - {trend_desc}")
+                close, high, low = df['Close'], df['High'], df['Low']
+            df_calc = pd.DataFrame({'Close': close, 'High': high, 'Low': low}).dropna().tail(lookback_days).copy()
+            if len(df_calc) < max(3, channel_window):
+                st.error('有效行情筆數不足，無法計算此分析週期。')
+                st.stop()
 
-        st.write("") # 增加區塊間距
+            y = df_calc['Close'].to_numpy(dtype=float)
+            x = np.arange(len(y))
+            slope, intercept, _, _, _ = stats.linregress(x, y)
+            trend_line = slope * x + intercept
+            std_dev = np.std(y - trend_line)
+            upper = df_calc['High'].rolling(window=channel_window).max()
+            lower = df_calc['Low'].rolling(window=channel_window).min()
+            ma = df_calc['Close'].rolling(window=channel_window).mean()
+            st.session_state['analysis'] = dict(
+                stock_name=stock_name, df=df_calc, y=y, trend=trend_line, sd=std_dev,
+                slope=slope, upper=upper, lower=lower, ma=ma, window=channel_window
+            )
+    except Exception as exc:
+        st.error(f'分析失敗：{exc}')
+        st.stop()
 
-        # 下方圖表：左右並排
-        chart_col1, chart_col2 = st.columns(2)
+analysis = st.session_state['analysis']
+df_calc = analysis['df']
+y = analysis['y']
+trend_line = analysis['trend']
+std_dev = analysis['sd']
+slope = analysis['slope']
+channel_window = analysis['window']
 
-        with chart_col1:
-            st.markdown(f"**{stock_name} - 五線譜位階**")
-            fig1, ax1 = plt.subplots(figsize=(8, 4.5))
-            # 維持你原本習慣的顏色設定
-            ax1.plot(df_calc.index, trend_line + 2*std_dev, 'r--', label='+2SD')
-            ax1.plot(df_calc.index, trend_line + 1*std_dev, color='salmon', linestyle='--', alpha=0.5)
-            ax1.plot(df_calc.index, trend_line, 'b', label='TL')
-            ax1.plot(df_calc.index, trend_line - 1*std_dev, color='lightgreen', linestyle='--', alpha=0.5)
-            ax1.plot(df_calc.index, trend_line - 2*std_dev, 'g--', label='-2SD')
-            ax1.plot(df_calc.index, y, 'k', label='Price')
-            ax1.legend(loc='upper left')
-            ax1.grid(True, alpha=0.3)
-            # 強制設定為白底，避免被網頁黑底影響
-            fig1.patch.set_facecolor('white')
-            ax1.set_facecolor('white')
-            st.pyplot(fig1)
+curr = float(y[-1])
+p2sd = float((trend_line + 2 * std_dev)[-1])
+p1sd = float((trend_line + std_dev)[-1])
+m1sd = float((trend_line - std_dev)[-1])
+m2sd = float((trend_line - 2 * std_dev)[-1])
 
-        with chart_col2:
-            st.markdown(f"**動能通道 ({channel_window}日)**")
-            fig2, ax2 = plt.subplots(figsize=(8, 4.5))
-            ax2.fill_between(df_calc.index, lohas_upper, lohas_lower, color='cyan', alpha=0.1)
-            ax2.plot(df_calc.index, lohas_upper, color='teal')
-            ax2.plot(df_calc.index, lohas_lower, color='teal')
-            ax2.plot(df_calc.index, lohas_ma, color='orange', linestyle='--')
-            ax2.plot(df_calc.index, y, 'k')
-            ax2.grid(True, alpha=0.3)
-            fig2.patch.set_facecolor('white')
-            ax2.set_facecolor('white')
-            st.pyplot(fig2)
+with advice_area:
+    if curr > p2sd:
+        st.error('🚨 **極度危險 (強烈減碼訊號)**\n\n目前股價已突破 +2SD，價格極度昂貴。')
+    elif curr > p1sd:
+        st.warning('⚠️ **相對高檔 (減碼訊號)**\n\n目前股價位於 +1SD ~ +2SD 之間，價格偏貴。若持有部位可考慮適度調節，空手者不建議此時進場。')
+    elif curr < m2sd:
+        st.success('💰 **極度便宜 (強烈買進訊號)**\n\n目前股價跌破 -2SD，價格極度便宜。')
+    elif curr < m1sd:
+        st.info('🟢 **相對低檔 (買進訊號)**\n\n目前股價位於 -1SD ~ -2SD 之間，價格偏便宜。')
+    else:
+        st.info('⚖️ **價格合理 (觀望或定期定額)**\n\n目前股價位於 -1SD ~ +1SD 之間，評價合理。')
+    trend_status = '多頭趨勢' if slope > 0 else '空頭趨勢'
+    trend_desc = '股價長期重心向上移動，回檔找買點勝率較高。' if slope > 0 else '股價長期重心向下移動，反彈找賣點勝率較高。'
+    st.markdown(f'📊 趨勢背景：**{trend_status}** (斜率 {slope:.2f}) - {trend_desc}')
 
-    except Exception as e:
-        st.error(f"分析失敗: {e}")
+# 下排兩張圖同一列、各佔一半寬度。
+chart_left, chart_right = st.columns(2, gap='small', vertical_alignment='top')
+with chart_left:
+    st.markdown(f'**{analysis["stock_name"]} - 五線譜位階**')
+    fig1, ax1 = plt.subplots(figsize=(8.5, 5), dpi=120)
+    ax1.plot(df_calc.index, trend_line + 2 * std_dev, 'r--', label='+2SD')
+    ax1.plot(df_calc.index, trend_line + std_dev, color='salmon', linestyle='--', alpha=.5)
+    ax1.plot(df_calc.index, trend_line, 'b', label='TL')
+    ax1.plot(df_calc.index, trend_line - std_dev, color='lightgreen', linestyle='--', alpha=.5)
+    ax1.plot(df_calc.index, trend_line - 2 * std_dev, 'g--', label='-2SD')
+    ax1.plot(df_calc.index, y, 'k', label='Price')
+    ax1.legend(loc='upper left')
+    ax1.grid(True, alpha=.3)
+    fig1.patch.set_facecolor('white')
+    ax1.set_facecolor('white')
+    fig1.tight_layout()
+    st.pyplot(fig1, use_container_width=True)
+    plt.close(fig1)
+
+with chart_right:
+    st.markdown(f'**動能通道 ({channel_window}日)**')
+    fig2, ax2 = plt.subplots(figsize=(8.5, 5), dpi=120)
+    ax2.fill_between(df_calc.index, analysis['upper'].to_numpy(dtype=float), analysis['lower'].to_numpy(dtype=float), color='cyan', alpha=.1)
+    ax2.plot(df_calc.index, analysis['upper'], color='teal')
+    ax2.plot(df_calc.index, analysis['lower'], color='teal')
+    ax2.plot(df_calc.index, analysis['ma'], color='orange', linestyle='--')
+    ax2.plot(df_calc.index, y, 'k')
+    ax2.grid(True, alpha=.3)
+    fig2.patch.set_facecolor('white')
+    ax2.set_facecolor('white')
+    fig2.tight_layout()
+    st.pyplot(fig2, use_container_width=True)
+    plt.close(fig2)
